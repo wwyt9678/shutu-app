@@ -69,3 +69,4 @@ jobs:
           git add -f 书途.apk
           git commit -m "自动生成书途 APK" || echo "没有变化"
           git push || echo "push 没成功也没关系，去下面的 Artifacts 下载一样能装"
+
