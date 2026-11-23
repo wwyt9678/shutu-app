@@ -1,3 +1,5 @@
+
+
 name: 构建书途APK
 
 on:
@@ -11,13 +13,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+
       - uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
+
       - name: 解压工程
         run: |
           if [ -f app-src.zip ]; then
@@ -35,12 +40,55 @@ jobs:
             unzip -q "$SRC" -d project
           fi
           test -f project/www/index.html || (echo "网页入口缺失"; exit 1)
+
       - name: 安装依赖
         working-directory: project
-        run: npm install --no-audit --no-fund
-      - name: 打包锁屏提醒脚本
-        working-directory: project
-        run: npx esbuild native-alarm.js --bundle --format=iife --outfile=www/native-alarm.js
+        run: |
+          npm install --no-audit --no-fund --ignore-scripts
+          test -d node_modules/@capacitor/core || (echo "Capacitor 依赖没装好"; exit 1)
+
+      - name: 写入锁屏提醒脚本
+        run: |
+          cat > project/www/native-alarm.js <<'NATIVE_JS_EOF'
+          (function(){
+          'use strict';
+          function boot(fn){if(document.body)fn();else document.addEventListener('DOMContentLoaded',fn);}
+          boot(function(){
+          if(document.getElementById('naBox'))return;
+          var P=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.LocalNotifications;
+          var css=document.createElement('style');
+          css.textContent='#naBox{position:fixed;right:10px;bottom:12px;z-index:2147483000;width:228px;max-width:72vw;background:#fff;border:1px solid #D8D8D8;border-radius:12px;box-shadow:0 2px 12px rgba(0,0,0,.10);font:12px/1.55 -apple-system,BlinkMacSystemFont,"WenQuanYi Micro Hei",system-ui,sans-serif;color:#262626;overflow:hidden}#naHead{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 10px;cursor:pointer;font-weight:600;white-space:nowrap}#naBox:not(.open) #naHead{border-bottom:0}#naBox.open #naHead{border-bottom:1px solid #EDEDED}#naTog{border:0;background:#F2F2F2;color:#333;border-radius:6px;padding:2px 8px;font-size:11px;flex:none}#naBody{display:none;padding:10px}#naBox.open #naBody{display:block}#naTip{margin:0 0 8px;color:#666;font-size:11px}#naRow{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:7px}#naRow button{border:1px solid #D0D0D0;background:#fff;color:#262626;border-radius:6px;padding:4px 9px;font-size:12px}#naRow button.on{background:#262626;color:#fff;border-color:#262626}#naMin{width:50px;border:1px solid #D0D0D0;border-radius:6px;padding:4px 6px;font-size:12px;color:#262626;background:#fff}#naGo{border:0;background:#262626;color:#fff;border-radius:6px;padding:5px 12px;font-size:12px;margin-left:5px}#naDel{border:0;background:none;color:#888;font-size:11px;padding:4px 2px;margin-left:4px}#naStat{margin-top:7px;font-size:11px;color:#1F1F1F;min-height:16px}';
+          document.head.appendChild(css);
+          var box=document.createElement('div');box.id='naBox';
+          box.innerHTML='<div id="naHead"><span>⏰ 锁屏提醒</span><button id="naTog" type="button">展开</button></div>'+
+          '<div id="naBody"><p id="naTip">开始计时后顺手点一下时长，到点由系统通知响，锁屏也听得见。</p>'+
+          '<div id="naRow"><button type="button" data-m="10">10 分</button><button type="button" data-m="25">25 分</button>'+
+          '<button type="button" data-m="45">45 分</button><button type="button" data-m="60">60 分</button></div>'+
+          '<input id="naMin" type="number" min="1" max="600" value="25" aria-label="自定义分钟"> 分'+
+          '<button id="naGo" type="button">设定</button><button id="naDel" type="button">取消</button>'+
+          '<div id="naStat"></div></div>';
+          document.body.appendChild(box);
+          var $=function(i){return document.getElementById(i);};
+          var head=$('naHead'),tog=$('naTog'),stat=$('naStat'),minEl=$('naMin'),row=$('naRow'),ID=91001,CH='shutu_timer';
+          function open(v){box.classList.toggle('open',v);tog.textContent=v?'收起':'展开';}
+          head.addEventListener('click',function(e){if(e.target===tog)return;open(!box.classList.contains('open'));});
+          tog.addEventListener('click',function(e){e.stopPropagation();open(!box.classList.contains('open'));});
+          row.addEventListener('click',function(e){var b=e.target.closest('button[data-m]');if(!b)return;minEl.value=b.getAttribute('data-m');Array.prototype.forEach.call(row.querySelectorAll('button'),function(x){x.classList.toggle('on',x===b);});});
+          function pad(n){return ('0'+n).slice(-2);}
+          function hhmm(d){return pad(d.getHours())+':'+pad(d.getMinutes());}
+          /* 自动读出当前阶段结束时刻，作为默认分钟数 */
+          function autoFill(){try{var S=window.S,e=0;if(S&&S.fo&&S.fo.run)e=(S.fo.t0||0)+(S.fo.dur||0);else if(S&&S.pomo&&S.pomo.run)e=(S.pomo.t0||0)+(S.pomo.dur||0);if(e>Date.now()){var m=Math.max(1,Math.round((e-Date.now())/60000));if(m<=600)minEl.value=m;}}catch(x){}}
+          autoFill();
+          async function ensure(){if(!P){stat.textContent='原生通知插件未就绪';return false;}try{var p=await P.checkPermissions();if(p.display!=='granted'){var r=await P.requestPermissions();if(!r||r.display!=='granted'){stat.textContent='需要允许通知权限';return false;}}try{await P.createChannel({id:CH,name:'计时结束',description:'专注 / 番茄结束提醒',importance:5,vibration:true});}catch(x){}return true;}catch(x){stat.textContent='通知初始化失败';return false;}}
+          $('naGo').addEventListener('click',async function(){var m=parseInt(minEl.value,10);if(!m||m<1||m>600){stat.textContent='请填 1 ~ 600 分钟';return;}if(!(await ensure()))return;try{await P.cancel({notifications:[{id:ID}]});var at=new Date(Date.now()+m*60000);await P.schedule({notifications:[{id:ID,title:'⏰ 书途 · 时间到',body:'这一段时间结束了，回来看看并结算吧',channelId:CH,autoCancel:true,schedule:{at:at,allowWhileIdle:true}}]});stat.textContent='已设 '+m+' 分钟 · '+hhmm(at)+' 响（锁屏也会响）';open(true);}catch(x){stat.textContent='设定失败：'+(x&&x.message?x.message:x);}});
+          $('naDel').addEventListener('click',async function(){try{await P.cancel({notifications:[{id:ID}]});stat.textContent='已取消提醒';}catch(x){stat.textContent='取消失败';}});
+          try{P.addListener('localNotificationActionPerformed',function(){stat.textContent='刚才那段结束了 ✓';open(true);});}catch(x){}
+          ensure();
+          });
+          })();
+          NATIVE_JS_EOF
+          test -s project/www/native-alarm.js || (echo "脚本写入失败"; exit 1)
+
       - name: 生成 Android 工程
         working-directory: project
         env:
@@ -48,20 +96,26 @@ jobs:
         run: |
           npx cap add android
           npx cap sync android
+          test -f android/app/src/main/AndroidManifest.xml || (echo "cap add 没生成 Android 工程"; exit 1)
+
       - name: 补齐系统权限
         working-directory: project
         run: python3 patch-android.py
+
       - name: 编译 APK
         working-directory: project/android
         run: |
           chmod +x ./gradlew
           ./gradlew assembleDebug --no-daemon --stacktrace
+
       - name: 取出 APK
         run: cp project/android/app/build/outputs/apk/debug/app-debug.apk 书途.apk
+
       - uses: actions/upload-artifact@v4
         with:
           name: 书途APK
           path: 书途.apk
+
       - name: 放回仓库方便手机直接下载
         run: |
           git config user.name "shutu-bot"
@@ -69,4 +123,4 @@ jobs:
           git add -f 书途.apk
           git commit -m "自动生成书途 APK" || echo "没有变化"
           git push || echo "push 没成功也没关系，去下面的 Artifacts 下载一样能装"
-
+concurrency: 
